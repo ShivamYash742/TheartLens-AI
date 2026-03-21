@@ -34,12 +34,13 @@ Now extract threats from this text:
  * Call Ollama local LLM
  */
 async function callOllama(text: string): Promise<LLMResponse> {
-  const host = process.env.OLLAMA_HOST || "http://localhost:11434";
-  const model = process.env.OLLAMA_MODEL || "qwen3.5:latest";
+  const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const model = process.env.OLLAMA_MODEL || "lfm2.5-thinking";
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60000); // 60s timeout
+    // 5-minute timeout for slower local hardware
+    const timeout = setTimeout(() => controller.abort(), 300000); 
 
     const response = await fetch(`${host}/api/generate`, {
       method: "POST",
@@ -174,7 +175,7 @@ export async function checkProviderStatus(
 
   if (provider === "ollama") {
     try {
-      const host = process.env.OLLAMA_HOST || "http://localhost:11434";
+      const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
       const res = await fetch(`${host}/api/tags`, {
         signal: AbortSignal.timeout(3000),
       });

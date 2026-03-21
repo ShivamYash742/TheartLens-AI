@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { uploadDocument } from "@/app/actions";
+import Link from "next/link";
 import type { Threat } from "@/types";
 
 type LLMProvider = "ollama" | "openrouter" | "regex-only";
@@ -9,32 +10,6 @@ type LLMProvider = "ollama" | "openrouter" | "regex-only";
 interface FileUploadProps {
   onUploadComplete?: (threats: Threat[]) => void;
 }
-
-const PROVIDERS: {
-  id: LLMProvider;
-  label: string;
-  icon: string;
-  desc: string;
-}[] = [
-  {
-    id: "ollama",
-    label: "Ollama (Local)",
-    icon: "🦙",
-    desc: "qwen3.5 — Private, no data leaves your machine",
-  },
-  {
-    id: "openrouter",
-    label: "OpenRouter",
-    icon: "🌐",
-    desc: "Cloud APIs — Access 100+ models",
-  },
-  {
-    id: "regex-only",
-    label: "Regex Only",
-    icon: "⚡",
-    desc: "Pattern matching — Instant, no AI required",
-  },
-];
 
 export default function FileUpload({ onUploadComplete }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
@@ -56,6 +31,17 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
       setIsUploading(true);
       setFileName(file.name);
       setResult(null);
+
+      // 5MB Limit Check
+      if (file.size > 5 * 1024 * 1024) {
+        setResult({
+          error: {
+            general: ["File exceeds the 5 MB limit. Please upload a smaller file."],
+          },
+        });
+        setIsUploading(false);
+        return;
+      }
 
       try {
         let content = "";
@@ -122,7 +108,7 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
     (e: React.DragEvent) => {
       e.preventDefault();
       setIsDragging(false);
-      const file = e.dataTransfer.files[0];
+      const file = e.dataTransfer.files?.[0];
       if (file) processFile(file);
     },
     [processFile]
@@ -138,39 +124,99 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
 
   return (
     <div className="space-y-6">
-      {/* AI Provider Selector */}
-      <div>
-        <label className="text-sm font-medium text-[var(--color-text-secondary)] mb-3 block">
-          🤖 AI Extraction Engine
+      {/* Provider Selection */}
+      <div className="mb-6 space-y-3">
+        <label className="text-sm font-semibold uppercase tracking-wider text-[var(--color-text-primary)]">
+          Intelligence Engine
         </label>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {PROVIDERS.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => setProvider(p.id)}
-              className={`
-                relative text-left p-4 rounded-xl border transition-all duration-200
-                ${
-                  provider === p.id
-                    ? "border-[var(--color-accent)] bg-[rgba(99,102,241,0.1)] shadow-[0_0_15px_var(--color-accent-glow)]"
-                    : "border-[var(--color-border)] bg-[var(--color-bg-card)] hover:border-[var(--color-text-muted)]"
-                }
-              `}
-              id={`provider-${p.id}`}
-            >
-              {provider === p.id && (
-                <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          
+          {/* Ollama Local */}
+          <label
+            className={`relative flex flex-col p-4 rounded-md border text-left cursor-pointer transition-all ${
+              provider === "ollama"
+                ? "border-[var(--color-accent)] bg-[rgba(0,255,255,0.05)] shadow-[inset_0_0_20px_rgba(0,255,255,0.05)]"
+                : "border-[var(--color-border)] bg-[var(--color-bg-primary)] hover:border-[var(--color-text-muted)] hover:bg-[var(--color-bg-card-hover)]"
+            }`}
+          >
+            <input
+              type="radio"
+              name="provider"
+              value="ollama"
+              className="sr-only"
+              checked={provider === "ollama"}
+              onChange={(e) => setProvider(e.target.value as LLMProvider)}
+            />
+            <div className="flex items-center justify-between mb-2">
+               <span className={`font-mono font-semibold ${provider === "ollama" ? "text-[var(--color-accent)]" : "text-[var(--color-text-primary)]"}`}>
+                <span className="text-lg mr-2 align-middle">🖥️</span> Local Hybrid
+              </span>
+              {provider === "ollama" && (
+                <div className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
               )}
-              <div className="text-xl mb-1">{p.icon}</div>
-              <div className="text-sm font-semibold text-[var(--color-text-primary)]">
-                {p.label}
-              </div>
-              <div className="text-xs text-[var(--color-text-muted)] mt-0.5">
-                {p.desc}
-              </div>
-            </button>
-          ))}
+            </div>
+            <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+              Regex + Local Model <br/> (qwen3.5 — Private execution)
+            </p>
+          </label>
+
+          {/* OpenRouter */}
+          <label
+            className={`relative flex flex-col p-4 rounded-md border text-left cursor-pointer transition-all ${
+              provider === "openrouter"
+                ? "border-[var(--color-accent)] bg-[rgba(0,255,255,0.05)] shadow-[inset_0_0_20px_rgba(0,255,255,0.05)]"
+                : "border-[var(--color-border)] bg-[var(--color-bg-primary)] hover:border-[var(--color-text-muted)] hover:bg-[var(--color-bg-card-hover)]"
+            }`}
+          >
+            <input
+              type="radio"
+              name="provider"
+              value="openrouter"
+              className="sr-only"
+              checked={provider === "openrouter"}
+              onChange={(e) => setProvider(e.target.value as LLMProvider)}
+            />
+            <div className="flex items-center justify-between mb-2">
+              <span className={`font-mono font-semibold ${provider === "openrouter" ? "text-[var(--color-accent)]" : "text-[var(--color-text-primary)]"}`}>
+                <span className="text-lg mr-2 align-middle">☁️</span> Cloud Hybrid
+              </span>
+              {provider === "openrouter" && (
+                <div className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
+              )}
+            </div>
+            <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+              Regex + OpenRouter <br/> (Fast, Cloud API)
+            </p>
+          </label>
+
+          {/* Regex Only */}
+          <label
+            className={`relative flex flex-col p-4 rounded-md border text-left cursor-pointer transition-all ${
+              provider === "regex-only"
+                ? "border-[var(--color-text-primary)] bg-[rgba(255,255,255,0.05)]"
+                : "border-[var(--color-border)] bg-[var(--color-bg-primary)] hover:border-[var(--color-text-muted)] hover:bg-[var(--color-bg-card-hover)]"
+            }`}
+          >
+            <input
+              type="radio"
+              name="provider"
+              value="regex-only"
+              className="sr-only"
+              checked={provider === "regex-only"}
+              onChange={(e) => setProvider(e.target.value as LLMProvider)}
+            />
+            <div className="flex items-center justify-between mb-2">
+               <span className={`font-mono font-semibold ${provider === "regex-only" ? "text-[var(--color-text-primary)]" : "text-[var(--color-text-primary)]"}`}>
+                <span className="text-lg mr-2 align-middle">⚡</span> Heuristics
+              </span>
+              {provider === "regex-only" && (
+                <div className="w-2 h-2 rounded-full bg-[var(--color-text-primary)]" />
+              )}
+            </div>
+            <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+              Regex pattern matching only.<br/>(Instant processing)
+            </p>
+          </label>
         </div>
       </div>
 
@@ -219,7 +265,7 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
           </div>
         ) : (
           <div className="space-y-4">
-            <div className="w-16 h-16 mx-auto rounded-2xl gradient-bg bg-opacity-15 flex items-center justify-center text-3xl">
+            <div className="w-16 h-16 mx-auto rounded-2xl bg-[var(--color-bg-card)] border border-[var(--color-border)] flex items-center justify-center text-3xl">
               📄
             </div>
             <div>
@@ -234,7 +280,7 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
             </div>
             <button
               type="button"
-              className="btn-secondary text-sm"
+              className="btn-primary text-sm"
               onClick={(e) => {
                 e.stopPropagation();
                 fileInputRef.current?.click();
@@ -251,42 +297,47 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
         <div
           className={`rounded-xl p-6 animate-fade-in ${
             result.success
-              ? "bg-[rgba(34,197,94,0.1)] border border-[rgba(34,197,94,0.3)]"
-              : "bg-[rgba(239,68,68,0.1)] border border-[rgba(239,68,68,0.3)]"
+              ? "bg-[rgba(57,255,20,0.05)] border border-[rgba(57,255,20,0.2)]"
+              : "bg-[rgba(255,0,0,0.05)] border border-[rgba(255,0,0,0.2)]"
           }`}
         >
           {result.success ? (
             <div className="flex items-start gap-3">
-              <span className="text-2xl">✅</span>
+              <span className="text-2xl mt-0.5">🟢</span>
               <div>
                 <h4 className="font-semibold text-[var(--color-success)]">
-                  Upload Successful!
+                  Extraction Successful
                 </h4>
                 <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-                  Extracted <strong>{result.count}</strong> threat
+                  Identified <strong>{result.count}</strong> critical event
                   {result.count !== 1 ? "s" : ""} from{" "}
                   <strong>{fileName}</strong>
                 </p>
-                <div className="flex items-center gap-2 mt-2 text-xs text-[var(--color-text-muted)]">
-                  <span className="px-2 py-0.5 rounded-full bg-[var(--color-bg-card)] border border-[var(--color-border)]">
+                <div className="flex items-center gap-2 mt-3 text-xs text-[var(--color-text-muted)]">
+                  <span className="font-mono px-2 py-0.5 rounded border border-[var(--color-border)]">
                     {result.llmUsed
-                      ? `🤖 ${result.provider === "ollama" ? "Ollama" : "OpenRouter"} AI`
-                      : "⚡ Regex"}
+                      ? `🧠 ${result.provider === "ollama" ? "Local hybrid" : "Cloud hybrid"}`
+                      : "⚡ Heuristics only"}
                   </span>
                   {result.llmError && (
-                    <span className="text-[var(--color-warning)]">
-                      ⚠️ LLM fallback: {result.llmError}
+                    <span className="text-[var(--color-warning)] font-mono">
+                      ⚠️ ENGIN_FAIL: {result.llmError}
                     </span>
                   )}
+                </div>
+                <div className="mt-4">
+                  <Link href="/dashboard" className="btn-primary text-sm inline-flex items-center gap-2">
+                    <span>📊</span> View in Command Center
+                  </Link>
                 </div>
               </div>
             </div>
           ) : (
             <div className="flex items-start gap-3">
-              <span className="text-2xl">❌</span>
+              <span className="text-2xl mt-0.5">🔴</span>
               <div>
                 <h4 className="font-semibold text-[var(--color-danger)]">
-                  Upload Failed
+                  Extraction Failed
                 </h4>
                 {result.error &&
                   Object.entries(result.error).map(([key, msgs]) => (
