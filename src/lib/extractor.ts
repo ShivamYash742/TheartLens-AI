@@ -1,4 +1,8 @@
 import type { ExtractedThreat } from "@/types";
+import { callLLM, type LLMProvider } from "@/lib/llm-client";
+import { extractedThreatSchema } from "@/lib/validators";
+
+// ─── Layer 1: Regex Patterns ────────────────────────────────────────────────
 
 const CVE_REGEX = /CVE-\d{4}-\d{4,}/gi;
 
@@ -44,7 +48,6 @@ const SYSTEM_PATTERNS: Record<string, RegExp> = {
 function detectSeverity(text: string): string {
   for (const [level, regex] of Object.entries(SEVERITY_KEYWORDS)) {
     if (regex.test(text)) {
-      // Reset regex lastIndex
       regex.lastIndex = 0;
       return level;
     }
@@ -79,33 +82,38 @@ function extractCVEs(text: string): string[] {
   return matches ? [...new Set(matches.map((m) => m.toUpperCase()))] : [];
 }
 
-/**
- * Extract threats from raw text content.
- * Uses regex-based NLP simulation to identify threat types, CVEs,
- * severity levels, and affected systems.
- */
-export function extractThreatsFromText(text: string): ExtractedThreat[] {
-  const threats: ExtractedThreat[] = [];
-  const cves = extractCVEs(text);
-  const threatTypes = detectThreatTypes(text);
-  const severity = detectSeverity(text);
-  const systems = detectSystems(text);
+// ─── Pre-processing ─────────────────────────────────────────────────────────
 
-  // If we found CVEs, create a threat for each
-  if (cves.length > 0) {
-    for (const cve of cves) {
-      threats.push({
-        type: threatTypes[0],
-        cve,
-        severity,
-        affected_system: systems[0],
-      });
-    }
+function cleanText(raw: string): string {
+  return raw
+    .replace(/[^\x20-\x7E\n\r\t]/g, " ") // Remove non-ASCII
+    .replace(/\s{3,}/g, "  ")              // Collapse excessive whitespace
+    .replace(/\n{3,}/g, "\n\n")            // Collapse excessive newlines
+    .trim();
+}
+
+// ─── Layer 1: Regex-only extraction ─────────────────────────────────────────
+
+export function extractThreatsRegex(text: string): ExtractedThreat[] {
+  const cleaned = cleanText(text);
+  const threats: ExtractedThreat[] = [];
+  const cves = extractCVEs(cleaned);
+  const threatTypes = detectThreatTypes(cleaned);
+  const severity = detectSeverity(cleaned);
+  const systems = detectSystems(cleaned);
+
+  // CVE-based threats
+  for (const cve of cves) {
+    threats.push({
+      type: threatTypes[0],
+      cve,
+      severity,
+      affected_system: systems[0],
+    });
   }
 
-  // Create threats for each detected threat type
+  // Type-based threats
   for (const type of threatTypes) {
-    // Avoid duplicating if we already have a CVE-based entry with this type
     const alreadyExists = threats.some((t) => t.type === type);
     if (!alreadyExists) {
       threats.push({
@@ -117,7 +125,6 @@ export function extractThreatsFromText(text: string): ExtractedThreat[] {
     }
   }
 
-  // If nothing was detected, create a single generic entry
   if (threats.length === 0) {
     threats.push({
       type: "Unclassified",
@@ -128,4 +135,108 @@ export function extractThreatsFromText(text: string): ExtractedThreat[] {
   }
 
   return threats;
+}
+
+// ─── Layer 2: LLM-based extraction ──────────────────────────────────────────
+
+function parseLLMResponse(raw: string): ExtractedThreat[] {
+  try {
+    // Extract JSON array from response (handle markdown code blocks)
+    let jsonStr = raw.trim();
+
+    // Strip markdown code fences
+    jsonStr = jsonStr.replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?```\s*$/i, "");
+
+    // Strip any thinking tags (qwen3 sometimes outputs these)
+    jsonStr = jsonStr.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
+    // Find the JSON array
+    const arrayMatch = jsonStr.match(/\[[\s\S]*\]/);
+    if (!arrayMatch) return [];
+
+    const parsed = JSON.parse(arrayMatch[0]);
+    if (!Array.isArray(parsed)) return [];
+
+    // Validate each item with Zod
+    const validated: ExtractedThreat[] = [];
+    for (const item of parsed) {
+      const result = extractedThreatSchema.safeParse(item);
+      if (result.success) {
+        validated.push(result.data);
+      }
+    }
+    return validated;
+  } catch {
+    return [];
+  }
+}
+
+// ─── Layer 3: De-duplication & Consolidation ────────────────────────────────
+
+function deduplicateThreats(threats: ExtractedThreat[]): ExtractedThreat[] {
+  const seen = new Set<string>();
+  const unique: ExtractedThreat[] = [];
+
+  for (const threat of threats) {
+    // De-duplicate by type+cve combination
+    const key = `${threat.type}::${threat.cve}`.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(threat);
+    }
+  }
+  return unique;
+}
+
+// ─── Public API ─────────────────────────────────────────────────────────────
+
+/** Sync regex-only extraction (backward compatible) */
+export function extractThreatsFromText(text: string): ExtractedThreat[] {
+  return extractThreatsRegex(text);
+}
+
+/** Async hybrid extraction: Regex + LLM → Validate → De-duplicate */
+export async function extractThreatsHybrid(
+  text: string,
+  provider: LLMProvider = "regex-only"
+): Promise<{
+  threats: ExtractedThreat[];
+  provider: LLMProvider;
+  llmUsed: boolean;
+  llmError?: string;
+}> {
+  const cleaned = cleanText(text);
+
+  // Layer 1: Always run regex
+  const regexThreats = extractThreatsRegex(cleaned);
+
+  // If regex-only mode, return immediately
+  if (provider === "regex-only") {
+    return { threats: regexThreats, provider, llmUsed: false };
+  }
+
+  // Layer 2: Call LLM
+  const llmResponse = await callLLM(provider, cleaned);
+
+  if (llmResponse.error || !llmResponse.text) {
+    // Fallback to regex-only results
+    return {
+      threats: regexThreats,
+      provider,
+      llmUsed: false,
+      llmError: llmResponse.error || "Empty LLM response",
+    };
+  }
+
+  // Parse and validate LLM output
+  const llmThreats = parseLLMResponse(llmResponse.text);
+
+  // Layer 3: Merge + de-duplicate (LLM results first, they're usually better)
+  const merged = deduplicateThreats([...llmThreats, ...regexThreats]);
+
+  return {
+    threats: merged,
+    provider,
+    llmUsed: true,
+  };
 }

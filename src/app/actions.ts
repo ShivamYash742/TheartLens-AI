@@ -1,11 +1,12 @@
 "use server";
 
 import { supabase } from "@/lib/supabaseClient";
-import { extractThreatsFromText } from "@/lib/extractor";
-import { uploadSchema, threatSchema, deleteThreatSchema } from "@/lib/validators";
+import { extractThreatsHybrid } from "@/lib/extractor";
+import { uploadSchema, threatSchema, deleteThreatSchema, llmProviderSchema } from "@/lib/validators";
 import { currentUser } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import type { Threat, Document } from "@/types";
+import type { LLMProvider } from "@/lib/llm-client";
 
 // Helper: get or create profile for current Clerk user
 async function getOrCreateProfile() {
@@ -33,18 +34,22 @@ async function getOrCreateProfile() {
   return created;
 }
 
-// Upload document and extract threats
+// Upload document and extract threats with hybrid NLP
 export async function uploadDocument(formData: FormData) {
   const profile = await getOrCreateProfile();
 
   const filename = formData.get("filename") as string;
   const content = formData.get("content") as string;
+  const providerRaw = formData.get("provider") as string || "regex-only";
 
-  // Validate input
+  // Validate inputs
   const validated = uploadSchema.safeParse({ filename, content });
   if (!validated.success) {
     return { error: validated.error.flatten().fieldErrors };
   }
+
+  const providerParsed = llmProviderSchema.safeParse(providerRaw);
+  const provider: LLMProvider = providerParsed.success ? providerParsed.data : "regex-only";
 
   // Insert document
   const { data: doc, error: docError } = await supabase
@@ -61,11 +66,11 @@ export async function uploadDocument(formData: FormData) {
     return { error: { general: [docError.message] } };
   }
 
-  // Extract threats
-  const extractedThreats = extractThreatsFromText(validated.data.content);
+  // Extract threats using hybrid pipeline
+  const extraction = await extractThreatsHybrid(validated.data.content, provider);
 
   // Insert threats
-  const threatsToInsert = extractedThreats.map((t) => ({
+  const threatsToInsert = extraction.threats.map((t) => ({
     document_id: doc.id,
     type: t.type,
     cve: t.cve,
@@ -89,6 +94,9 @@ export async function uploadDocument(formData: FormData) {
     document: doc as Document,
     threats: insertedThreats as Threat[],
     count: insertedThreats?.length ?? 0,
+    provider: extraction.provider,
+    llmUsed: extraction.llmUsed,
+    llmError: extraction.llmError,
   };
 }
 

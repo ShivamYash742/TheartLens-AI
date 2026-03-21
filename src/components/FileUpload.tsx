@@ -4,17 +4,49 @@ import { useState, useRef, useCallback } from "react";
 import { uploadDocument } from "@/app/actions";
 import type { Threat } from "@/types";
 
+type LLMProvider = "ollama" | "openrouter" | "regex-only";
+
 interface FileUploadProps {
   onUploadComplete?: (threats: Threat[]) => void;
 }
+
+const PROVIDERS: {
+  id: LLMProvider;
+  label: string;
+  icon: string;
+  desc: string;
+}[] = [
+  {
+    id: "ollama",
+    label: "Ollama (Local)",
+    icon: "🦙",
+    desc: "qwen3.5 — Private, no data leaves your machine",
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    icon: "🌐",
+    desc: "Cloud APIs — Access 100+ models",
+  },
+  {
+    id: "regex-only",
+    label: "Regex Only",
+    icon: "⚡",
+    desc: "Pattern matching — Instant, no AI required",
+  },
+];
 
 export default function FileUpload({ onUploadComplete }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [provider, setProvider] = useState<LLMProvider>("regex-only");
   const [result, setResult] = useState<{
     success?: boolean;
     count?: number;
+    provider?: string;
+    llmUsed?: boolean;
+    llmError?: string;
     error?: Record<string, string[]>;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -29,10 +61,8 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
         let content = "";
 
         if (file.type === "application/pdf") {
-          // Read PDF as ArrayBuffer and extract on server
           const arrayBuffer = await file.arrayBuffer();
           const uint8Array = new Uint8Array(arrayBuffer);
-          // Convert to base64 for transport
           let binary = "";
           for (let i = 0; i < uint8Array.length; i++) {
             binary += String.fromCharCode(uint8Array[i]);
@@ -45,13 +75,20 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
         const formData = new FormData();
         formData.set("filename", file.name);
         formData.set("content", content);
+        formData.set("provider", provider);
 
         const response = await uploadDocument(formData);
 
         if (response.error) {
           setResult({ error: response.error as Record<string, string[]> });
         } else {
-          setResult({ success: true, count: response.count });
+          setResult({
+            success: true,
+            count: response.count,
+            provider: response.provider,
+            llmUsed: response.llmUsed,
+            llmError: response.llmError,
+          });
           if (response.threats && onUploadComplete) {
             onUploadComplete(response.threats);
           }
@@ -68,7 +105,7 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
         setIsUploading(false);
       }
     },
-    [onUploadComplete]
+    [onUploadComplete, provider]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -101,6 +138,42 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
 
   return (
     <div className="space-y-6">
+      {/* AI Provider Selector */}
+      <div>
+        <label className="text-sm font-medium text-[var(--color-text-secondary)] mb-3 block">
+          🤖 AI Extraction Engine
+        </label>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {PROVIDERS.map((p) => (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => setProvider(p.id)}
+              className={`
+                relative text-left p-4 rounded-xl border transition-all duration-200
+                ${
+                  provider === p.id
+                    ? "border-[var(--color-accent)] bg-[rgba(99,102,241,0.1)] shadow-[0_0_15px_var(--color-accent-glow)]"
+                    : "border-[var(--color-border)] bg-[var(--color-bg-card)] hover:border-[var(--color-text-muted)]"
+                }
+              `}
+              id={`provider-${p.id}`}
+            >
+              {provider === p.id && (
+                <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
+              )}
+              <div className="text-xl mb-1">{p.icon}</div>
+              <div className="text-sm font-semibold text-[var(--color-text-primary)]">
+                {p.label}
+              </div>
+              <div className="text-xs text-[var(--color-text-muted)] mt-0.5">
+                {p.desc}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Drop Zone */}
       <div
         className={`drop-zone relative p-12 text-center cursor-pointer transition-all ${
@@ -138,7 +211,9 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
                 Processing {fileName}...
               </p>
               <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-                Extracting text and identifying threats
+                {provider === "regex-only"
+                  ? "Running pattern-based extraction"
+                  : `Analyzing with ${provider === "ollama" ? "Ollama (qwen3.5)" : "OpenRouter"}...`}
               </p>
             </div>
           </div>
@@ -192,6 +267,18 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
                   {result.count !== 1 ? "s" : ""} from{" "}
                   <strong>{fileName}</strong>
                 </p>
+                <div className="flex items-center gap-2 mt-2 text-xs text-[var(--color-text-muted)]">
+                  <span className="px-2 py-0.5 rounded-full bg-[var(--color-bg-card)] border border-[var(--color-border)]">
+                    {result.llmUsed
+                      ? `🤖 ${result.provider === "ollama" ? "Ollama" : "OpenRouter"} AI`
+                      : "⚡ Regex"}
+                  </span>
+                  {result.llmError && (
+                    <span className="text-[var(--color-warning)]">
+                      ⚠️ LLM fallback: {result.llmError}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           ) : (
