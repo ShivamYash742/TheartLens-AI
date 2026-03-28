@@ -1,21 +1,33 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import { uploadDocument } from "@/app/actions";
+import { uploadDocument, uploadFromText, uploadFromUrl } from "@/app/actions";
 import Link from "next/link";
 import type { Threat } from "@/types";
 
 type LLMProvider = "ollama" | "openrouter" | "regex-only";
+type InputMode = "file" | "text" | "url";
 
 interface FileUploadProps {
   onUploadComplete?: (threats: Threat[]) => void;
 }
 
+// Accepted file extensions
+const FILE_ACCEPT = ".pdf,.txt,.text,.log,.csv,.json,.png,.jpg,.jpeg,.webp";
+const IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp"];
+
+function getFileExtension(filename: string): string {
+  return filename.split(".").pop()?.toLowerCase() || "";
+}
+
 export default function FileUpload({ onUploadComplete }: FileUploadProps) {
+  const [inputMode, setInputMode] = useState<InputMode>("file");
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [provider, setProvider] = useState<LLMProvider>("regex-only");
+  const [pasteText, setPasteText] = useState("");
+  const [urlInput, setUrlInput] = useState("");
   const [result, setResult] = useState<{
     success?: boolean;
     count?: number;
@@ -23,20 +35,37 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
     llmUsed?: boolean;
     llmError?: string;
     error?: Record<string, string[]>;
+    jsonDetected?: boolean;
+    sourceUrl?: string;
   } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ─── File Upload Handler ──────────────────────────────────────────────────
   const processFile = useCallback(
     async (file: File) => {
       setIsUploading(true);
       setFileName(file.name);
       setResult(null);
 
-      // 5MB Limit Check
+      // 5MB limit
       if (file.size > 5 * 1024 * 1024) {
         setResult({
+          error: { general: ["File exceeds the 5 MB limit. Please upload a smaller file."] },
+        });
+        setIsUploading(false);
+        return;
+      }
+
+      const ext = getFileExtension(file.name);
+      const isImage = IMAGE_EXTENSIONS.includes(ext);
+
+      // Warn if image + regex-only
+      if (isImage && provider === "regex-only") {
+        setResult({
           error: {
-            general: ["File exceeds the 5 MB limit. Please upload a smaller file."],
+            general: [
+              "Image analysis requires an AI engine. Please select 'Local Hybrid' or 'Cloud Hybrid' above, then re-upload.",
+            ],
           },
         });
         setIsUploading(false);
@@ -54,6 +83,14 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
             binary += String.fromCharCode(uint8Array[i]);
           }
           content = `[PDF_BASE64]${btoa(binary)}`;
+        } else if (isImage) {
+          const arrayBuffer = await file.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          let binary = "";
+          for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
+          }
+          content = `[IMG_BASE64:${ext}]${btoa(binary)}`;
         } else {
           content = await file.text();
         }
@@ -82,9 +119,7 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
       } catch (err) {
         setResult({
           error: {
-            general: [
-              err instanceof Error ? err.message : "Upload failed",
-            ],
+            general: [err instanceof Error ? err.message : "Upload failed"],
           },
         });
       } finally {
@@ -94,6 +129,77 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
     [onUploadComplete, provider]
   );
 
+  // ─── Text Submit Handler ──────────────────────────────────────────────────
+  const handleTextSubmit = useCallback(async () => {
+    if (!pasteText.trim()) return;
+    setIsUploading(true);
+    setFileName("pasted-text");
+    setResult(null);
+
+    try {
+      const response = await uploadFromText(pasteText, provider);
+
+      if (response.error) {
+        setResult({ error: response.error as Record<string, string[]> });
+      } else {
+        setResult({
+          success: true,
+          count: response.count,
+          provider: response.provider,
+          llmUsed: response.llmUsed,
+          llmError: response.llmError,
+          jsonDetected: response.jsonDetected,
+        });
+        if (response.threats && onUploadComplete) {
+          onUploadComplete(response.threats);
+        }
+        setPasteText("");
+      }
+    } catch (err) {
+      setResult({
+        error: { general: [err instanceof Error ? err.message : "Processing failed"] },
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  }, [pasteText, provider, onUploadComplete]);
+
+  // ─── URL Submit Handler ───────────────────────────────────────────────────
+  const handleUrlSubmit = useCallback(async () => {
+    if (!urlInput.trim()) return;
+    setIsUploading(true);
+    setFileName(urlInput);
+    setResult(null);
+
+    try {
+      const response = await uploadFromUrl(urlInput, provider);
+
+      if (response.error) {
+        setResult({ error: response.error as Record<string, string[]> });
+      } else {
+        setResult({
+          success: true,
+          count: response.count,
+          provider: response.provider,
+          llmUsed: response.llmUsed,
+          llmError: response.llmError,
+          sourceUrl: response.sourceUrl,
+        });
+        if (response.threats && onUploadComplete) {
+          onUploadComplete(response.threats);
+        }
+        setUrlInput("");
+      }
+    } catch (err) {
+      setResult({
+        error: { general: [err instanceof Error ? err.message : "Fetch failed"] },
+      });
+    } finally {
+      setIsUploading(false);
+    }
+  }, [urlInput, provider, onUploadComplete]);
+
+  // ─── Drag & Drop Handlers ────────────────────────────────────────────────
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -122,6 +228,13 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
     [processFile]
   );
 
+  // ─── Tab Config ───────────────────────────────────────────────────────────
+  const tabs: { id: InputMode; label: string; icon: string }[] = [
+    { id: "file", label: "File Upload", icon: "📄" },
+    { id: "text", label: "Paste Text", icon: "📝" },
+    { id: "url", label: "URL Fetch", icon: "🔗" },
+  ];
+
   return (
     <div className="space-y-6">
       {/* Provider Selection */}
@@ -130,7 +243,6 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
           Intelligence Engine
         </label>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          
           {/* Ollama Local */}
           <label
             className={`relative flex flex-col p-4 rounded-md border text-left cursor-pointer transition-all ${
@@ -148,7 +260,7 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
               onChange={(e) => setProvider(e.target.value as LLMProvider)}
             />
             <div className="flex items-center justify-between mb-2">
-               <span className={`font-mono font-semibold ${provider === "ollama" ? "text-[var(--color-accent)]" : "text-[var(--color-text-primary)]"}`}>
+              <span className={`font-mono font-semibold ${provider === "ollama" ? "text-[var(--color-accent)]" : "text-[var(--color-text-primary)]"}`}>
                 <span className="text-lg mr-2 align-middle">🖥️</span> Local Hybrid
               </span>
               {provider === "ollama" && (
@@ -206,7 +318,7 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
               onChange={(e) => setProvider(e.target.value as LLMProvider)}
             />
             <div className="flex items-center justify-between mb-2">
-               <span className={`font-mono font-semibold ${provider === "regex-only" ? "text-[var(--color-text-primary)]" : "text-[var(--color-text-primary)]"}`}>
+              <span className="font-mono font-semibold text-[var(--color-text-primary)]">
                 <span className="text-lg mr-2 align-middle">⚡</span> Heuristics
               </span>
               {provider === "regex-only" && (
@@ -220,79 +332,193 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
         </div>
       </div>
 
-      {/* Drop Zone */}
-      <div
-        className={`drop-zone relative p-12 text-center cursor-pointer transition-all ${
-          isDragging ? "drag-over" : ""
-        }`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onClick={() => fileInputRef.current?.click()}
-        role="button"
-        tabIndex={0}
-        aria-label="Upload security report"
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            fileInputRef.current?.click();
-          }
-        }}
-        id="file-drop-zone"
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".pdf,.txt,.text,.log,.csv"
-          onChange={handleFileChange}
-          className="hidden"
-          id="file-input"
-          aria-label="Select file to upload"
-        />
+      {/* ─── Input Mode Tabs ──────────────────────────────────────────────── */}
+      <div className="flex border-b border-[var(--color-border)]">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => {
+              setInputMode(tab.id);
+              setResult(null);
+            }}
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all border-b-2 -mb-px ${
+              inputMode === tab.id
+                ? "border-[var(--color-accent)] text-[var(--color-accent)]"
+                : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text-secondary)] hover:border-[var(--color-border)]"
+            }`}
+          >
+            <span>{tab.icon}</span>
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-        {isUploading ? (
+      {/* ─── Tab Content ──────────────────────────────────────────────────── */}
+      <div className="min-h-[200px]">
+        {/* FILE UPLOAD TAB */}
+        {inputMode === "file" && (
+          <div
+            className={`drop-zone relative p-12 text-center cursor-pointer transition-all ${
+              isDragging ? "drag-over" : ""
+            }`}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            role="button"
+            tabIndex={0}
+            aria-label="Upload security report"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                fileInputRef.current?.click();
+              }
+            }}
+            id="file-drop-zone"
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={FILE_ACCEPT}
+              onChange={handleFileChange}
+              className="hidden"
+              id="file-input"
+              aria-label="Select file to upload"
+            />
+
+            {isUploading ? (
+              <div className="space-y-4">
+                <div className="w-16 h-16 mx-auto rounded-full border-4 border-[var(--color-accent)] border-t-transparent animate-spin" />
+                <div>
+                  <p className="text-[var(--color-text-primary)] font-medium">
+                    Processing {fileName}...
+                  </p>
+                  <p className="text-sm text-[var(--color-text-secondary)] mt-1">
+                    {provider === "regex-only"
+                      ? "Running pattern-based extraction"
+                      : `Analyzing with ${provider === "ollama" ? "Ollama (qwen3.5)" : "OpenRouter"}...`}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="w-16 h-16 mx-auto rounded-2xl bg-[var(--color-bg-card)] border border-[var(--color-border)] flex items-center justify-center text-3xl">
+                  📄
+                </div>
+                <div>
+                  <p className="text-[var(--color-text-primary)] font-medium text-lg">
+                    {isDragging
+                      ? "Drop your file here"
+                      : "Drag & drop a security report"}
+                  </p>
+                  <p className="text-sm text-[var(--color-text-secondary)] mt-1">
+                    PDF, TXT, LOG, CSV, JSON, PNG, JPG, WEBP
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn-primary text-sm"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    fileInputRef.current?.click();
+                  }}
+                >
+                  Browse Files
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* PASTE TEXT TAB */}
+        {inputMode === "text" && (
           <div className="space-y-4">
-            <div className="w-16 h-16 mx-auto rounded-full border-4 border-[var(--color-accent)] border-t-transparent animate-spin" />
-            <div>
-              <p className="text-[var(--color-text-primary)] font-medium">
-                Processing {fileName}...
+            <textarea
+              value={pasteText}
+              onChange={(e) => setPasteText(e.target.value)}
+              placeholder={"Paste security report text, log output, or JSON threat data here...\n\nSupported formats:\n• Raw security report text\n• Server/application log output\n• JSON array of threats: [{\"type\":\"...\", \"cve\":\"...\", \"severity\":\"...\", \"affected_system\":\"...\"}]\n• JSON object with a \"threats\" key"}
+              className="w-full h-48 rounded-lg bg-[var(--color-bg-primary)] border border-[var(--color-border)] p-4 text-sm text-[var(--color-text-primary)] font-mono placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] resize-y transition-colors"
+              disabled={isUploading}
+              id="text-input"
+            />
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-[var(--color-text-muted)]">
+                {pasteText.length > 0
+                  ? `${pasteText.length.toLocaleString()} characters`
+                  : "Min 10 characters · Max 500K characters"}
               </p>
-              <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-                {provider === "regex-only"
-                  ? "Running pattern-based extraction"
-                  : `Analyzing with ${provider === "ollama" ? "Ollama (qwen3.5)" : "OpenRouter"}...`}
-              </p>
+              <button
+                type="button"
+                className="btn-primary text-sm px-6 py-2 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={handleTextSubmit}
+                disabled={isUploading || pasteText.trim().length < 10}
+                id="text-submit"
+              >
+                {isUploading ? (
+                  <>
+                    <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  <>
+                    <span>🔍</span> Analyze Text
+                  </>
+                )}
+              </button>
             </div>
           </div>
-        ) : (
+        )}
+
+        {/* URL FETCH TAB */}
+        {inputMode === "url" && (
           <div className="space-y-4">
-            <div className="w-16 h-16 mx-auto rounded-2xl bg-[var(--color-bg-card)] border border-[var(--color-border)] flex items-center justify-center text-3xl">
-              📄
+            <div className="flex gap-3">
+              <div className="flex-1 relative">
+                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]">
+                  🌐
+                </div>
+                <input
+                  type="url"
+                  value={urlInput}
+                  onChange={(e) => setUrlInput(e.target.value)}
+                  placeholder="https://example.com/security-advisory"
+                  className="w-full rounded-lg bg-[var(--color-bg-primary)] border border-[var(--color-border)] pl-10 pr-4 py-3 text-sm text-[var(--color-text-primary)] font-mono placeholder:text-[var(--color-text-muted)] focus:outline-none focus:border-[var(--color-accent)] focus:ring-1 focus:ring-[var(--color-accent)] transition-colors"
+                  disabled={isUploading}
+                  id="url-input"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && urlInput.trim()) {
+                      handleUrlSubmit();
+                    }
+                  }}
+                />
+              </div>
+              <button
+                type="button"
+                className="btn-primary text-sm px-6 py-2 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                onClick={handleUrlSubmit}
+                disabled={isUploading || !urlInput.trim()}
+                id="url-submit"
+              >
+                {isUploading ? (
+                  <>
+                    <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                    Fetching...
+                  </>
+                ) : (
+                  <>
+                    <span>📡</span> Fetch & Analyze
+                  </>
+                )}
+              </button>
             </div>
-            <div>
-              <p className="text-[var(--color-text-primary)] font-medium text-lg">
-                {isDragging
-                  ? "Drop your file here"
-                  : "Drag & drop a security report"}
-              </p>
-              <p className="text-sm text-[var(--color-text-secondary)] mt-1">
-                Supports PDF, TXT, LOG, CSV files
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn-primary text-sm"
-              onClick={(e) => {
-                e.stopPropagation();
-                fileInputRef.current?.click();
-              }}
-            >
-              Browse Files
-            </button>
+            <p className="text-xs text-[var(--color-text-muted)]">
+              Enter a URL to a security advisory, CVE database page, or any page containing threat data. Content will be fetched and analyzed server-side.
+            </p>
           </div>
         )}
       </div>
 
-      {/* Result */}
+      {/* ─── Result Display ───────────────────────────────────────────────── */}
       {result && (
         <div
           className={`rounded-xl p-6 animate-fade-in ${
@@ -310,15 +536,24 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
                 </h4>
                 <p className="text-sm text-[var(--color-text-secondary)] mt-1">
                   Identified <strong>{result.count}</strong> critical event
-                  {result.count !== 1 ? "s" : ""} from{" "}
-                  <strong>{fileName}</strong>
+                  {result.count !== 1 ? "s" : ""}{" "}
+                  {result.sourceUrl ? (
+                    <>from <strong className="break-all">{result.sourceUrl}</strong></>
+                  ) : (
+                    <>from <strong>{fileName}</strong></>
+                  )}
                 </p>
-                <div className="flex items-center gap-2 mt-3 text-xs text-[var(--color-text-muted)]">
+                <div className="flex flex-wrap items-center gap-2 mt-3 text-xs text-[var(--color-text-muted)]">
                   <span className="font-mono px-2 py-0.5 rounded border border-[var(--color-border)]">
                     {result.llmUsed
                       ? `🧠 ${result.provider === "ollama" ? "Local hybrid" : "Cloud hybrid"}`
                       : "⚡ Heuristics only"}
                   </span>
+                  {result.jsonDetected && (
+                    <span className="font-mono px-2 py-0.5 rounded border border-[rgba(0,255,255,0.3)] text-[var(--color-accent)]">
+                      📊 JSON auto-parsed
+                    </span>
+                  )}
                   {result.llmError && (
                     <span className="text-[var(--color-warning)] font-mono">
                       ⚠️ ENGIN_FAIL: {result.llmError}

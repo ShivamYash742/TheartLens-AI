@@ -43,6 +43,25 @@ export const extractedThreatSchema = z.object({
 /** Schema for LLM provider selection */
 export const llmProviderSchema = z.enum(["ollama", "openrouter", "regex-only"]);
 
+/** Schema for URL input */
+export const urlInputSchema = z.object({
+  url: z
+    .string()
+    .url("Please enter a valid URL")
+    .refine(
+      (url) => url.startsWith("http://") || url.startsWith("https://"),
+      "URL must start with http:// or https://"
+    ),
+});
+
+/** Schema for raw text input */
+export const textInputSchema = z.object({
+  text: z
+    .string()
+    .min(10, "Text must be at least 10 characters")
+    .max(500000, "Text exceeds 500K character limit"),
+});
+
 export type UploadInput = z.infer<typeof uploadSchema>;
 export type ThreatInput = z.infer<typeof threatSchema>;
 export type LLMProviderType = z.infer<typeof llmProviderSchema>;

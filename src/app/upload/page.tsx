@@ -12,9 +12,8 @@ export default function UploadPage() {
             Upload Security Report
           </h1>
           <p className="text-sm text-[var(--color-text-secondary)] mt-2">
-            Upload a PDF or text file containing security report data. Our
-            engine will extract threats, CVEs, severity levels, and affected
-            systems automatically.
+            Upload files, paste text, or fetch a URL. Our engine extracts
+            threats, CVEs, severity levels, and affected systems automatically.
           </p>
         </div>
 
@@ -32,13 +31,13 @@ export default function UploadPage() {
             {[
               {
                 step: "1",
-                title: "Upload",
-                desc: "Drop a PDF or text file with security report content.",
+                title: "Input",
+                desc: "Upload a file (PDF, TXT, JSON, CSV, images), paste text, or enter a URL.",
               },
               {
                 step: "2",
                 title: "Extract",
-                desc: "AI-powered extraction identifies CVEs, threats, and severity levels.",
+                desc: "AI-powered extraction identifies CVEs, threats, and severity levels from any format.",
               },
               {
                 step: "3",

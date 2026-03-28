@@ -92,6 +92,77 @@ function cleanText(raw: string): string {
     .trim();
 }
 
+// ─── JSON Input Parser ──────────────────────────────────────────────────────
+
+/**
+ * Attempts to parse input as structured JSON containing threat data.
+ * Supports: JSON array of threat objects, or an object with a threats/data/items array.
+ * Returns extracted threats if successful, null if input is not valid JSON.
+ */
+export function tryParseJsonInput(text: string): ExtractedThreat[] | null {
+  try {
+    const trimmed = text.trim();
+    if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return null;
+
+    const parsed = JSON.parse(trimmed);
+
+    // Direct array of threats
+    let items: unknown[] = [];
+    if (Array.isArray(parsed)) {
+      items = parsed;
+    } else if (typeof parsed === "object" && parsed !== null) {
+      // Look for common wrapper keys
+      const arrayKey = ["threats", "data", "items", "results", "vulnerabilities", "findings"].find(
+        (k) => Array.isArray(parsed[k])
+      );
+      if (arrayKey) {
+        items = parsed[arrayKey];
+      } else {
+        // Single threat object
+        items = [parsed];
+      }
+    }
+
+    if (items.length === 0) return null;
+
+    const threats: ExtractedThreat[] = [];
+    for (const item of items) {
+      if (typeof item !== "object" || item === null) continue;
+      const obj = item as Record<string, unknown>;
+
+      // Map common field name variations
+      const type =
+        (obj.type as string) ||
+        (obj.threat_type as string) ||
+        (obj.category as string) ||
+        (obj.name as string) ||
+        "General Threat";
+      const cve =
+        (obj.cve as string) ||
+        (obj.cve_id as string) ||
+        (obj.vulnerability_id as string) ||
+        "N/A";
+      const severity =
+        (obj.severity as string) ||
+        (obj.risk as string) ||
+        (obj.level as string) ||
+        "Medium";
+      const affected_system =
+        (obj.affected_system as string) ||
+        (obj.system as string) ||
+        (obj.target as string) ||
+        (obj.asset as string) ||
+        "Unknown";
+
+      threats.push({ type, cve, severity, affected_system });
+    }
+
+    return threats.length > 0 ? threats : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Layer 1: Regex-only extraction ─────────────────────────────────────────
 
 export function extractThreatsRegex(text: string): ExtractedThreat[] {
