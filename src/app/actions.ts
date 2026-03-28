@@ -23,10 +23,10 @@ async function getOrCreateProfile() {
 
   const { data: created, error } = await supabase
     .from("profiles")
-    .insert({
+    .upsert({
       email: user.emailAddresses[0]?.emailAddress ?? "unknown",
       clerk_id: user.id,
-    })
+    }, { onConflict: "clerk_id" })
     .select()
     .single();
 
