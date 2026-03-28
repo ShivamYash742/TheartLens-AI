@@ -1,0 +1,33 @@
+# Core
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+python-multipart==0.0.20
+pydantic==2.11.3
+pydantic-settings==2.8.1
+
+# Database
+sqlalchemy[asyncio]==2.0.41
+asyncpg==0.30.0
+alembic==1.16.1
+
+# File Processing
+pymupdf==1.25.6
+python-docx==1.1.2
+pandas==2.2.3
+openpyxl==3.1.5
+python-magic==0.4.27
+
+# AI / LLM
+openai==1.86.0
+httpx==0.28.1
+
+# STIX
+stix2==3.0.1
+
+# Background Tasks
+celery[redis]==5.5.3
+redis==5.3.0
+
+# Utilities
+python-dotenv==1.1.0
+aiofiles==24.1.0
