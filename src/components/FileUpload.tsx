@@ -5,7 +5,7 @@ import { uploadDocument, uploadFromText, uploadFromUrl } from "@/app/actions";
 import Link from "next/link";
 import type { Threat } from "@/types";
 
-type LLMProvider = "ollama" | "openrouter" | "regex-only";
+type LLMProvider = "ollama" | "openrouter" | "regex-only" | "alactic";
 type InputMode = "file" | "text" | "url";
 
 interface FileUploadProps {
@@ -25,7 +25,7 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
-  const [provider, setProvider] = useState<LLMProvider>("regex-only");
+  const [provider, setProvider] = useState<LLMProvider>("alactic");
   const [pasteText, setPasteText] = useState("");
   const [urlInput, setUrlInput] = useState("");
   const [result, setResult] = useState<{
@@ -242,7 +242,35 @@ export default function FileUpload({ onUploadComplete }: FileUploadProps) {
         <label className="text-sm font-semibold uppercase tracking-wider text-[var(--color-text-primary)]">
           Intelligence Engine
         </label>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          {/* Alactic AGI (Default Enterprise) */}
+          <label
+            className={`relative flex flex-col p-4 rounded-md border text-left cursor-pointer transition-all ${
+              provider === "alactic"
+                ? "border-[var(--color-accent)] bg-[rgba(0,255,255,0.05)] shadow-[inset_0_0_20px_rgba(0,255,255,0.05)]"
+                : "border-[var(--color-border)] bg-[var(--color-bg-primary)] hover:border-[var(--color-text-muted)] hover:bg-[var(--color-bg-card-hover)]"
+            }`}
+          >
+            <input
+              type="radio"
+              name="provider"
+              value="alactic"
+              className="sr-only"
+              checked={provider === "alactic"}
+              onChange={(e) => setProvider(e.target.value as LLMProvider)}
+            />
+            <div className="flex items-center justify-between mb-2">
+              <span className={`font-mono font-semibold ${provider === "alactic" ? "text-[var(--color-accent)]" : "text-[var(--color-text-primary)]"}`}>
+                <span className="text-lg mr-2 align-middle">🧠</span> Alactic AGI
+              </span>
+              {provider === "alactic" && (
+                <div className="w-2 h-2 rounded-full bg-[var(--color-accent)] animate-pulse" />
+              )}
+            </div>
+            <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+              Enterprise AGI <br/> (Highest accuracy, cloud)
+            </p>
+          </label>
           {/* Ollama Local */}
           <label
             className={`relative flex flex-col p-4 rounded-md border text-left cursor-pointer transition-all ${

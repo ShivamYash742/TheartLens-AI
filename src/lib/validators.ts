@@ -41,7 +41,7 @@ export const extractedThreatSchema = z.object({
 });
 
 /** Schema for LLM provider selection */
-export const llmProviderSchema = z.enum(["ollama", "openrouter", "regex-only"]);
+export const llmProviderSchema = z.enum(["ollama", "openrouter", "regex-only", "alactic"]);
 
 /** Schema for URL input */
 export const urlInputSchema = z.object({

@@ -3,7 +3,7 @@
  * Used by the hybrid threat extractor for semantic analysis.
  */
 
-export type LLMProvider = "ollama" | "openrouter" | "regex-only";
+export type LLMProvider = "ollama" | "openrouter" | "regex-only" | "alactic";
 
 interface LLMResponse {
   text: string;
@@ -145,6 +145,65 @@ async function callOpenRouter(text: string): Promise<LLMResponse> {
 }
 
 /**
+ * Call Alactic AGI API
+ */
+async function callAlactic(text: string): Promise<LLMResponse> {
+  const apiKey = process.env.ALACTIC_API_KEY;
+  const endpoint = process.env.ALACTIC_ENDPOINT || "https://api.alactic.io/v1/extract";
+
+  if (!apiKey) {
+    return {
+      text: "",
+      provider: "alactic",
+      error: "ALACTIC_API_KEY not configured",
+    };
+  }
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60000); // 60s timeout
+
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        content: text.substring(0, 8000),
+        task: "threat_extraction",
+        instructions: THREAT_EXTRACTION_PROMPT,
+      }),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return {
+        text: "",
+        provider: "alactic",
+        error: `Alactic AGI error ${response.status}: ${errText}`,
+      };
+    }
+
+    const data = await response.json();
+    // Assuming Alactic returns { result: "[{}, {}]" } or similar
+    const content = data?.result || data?.extracted_data || data?.text || JSON.stringify(data);
+    
+    return { text: content, provider: "alactic" };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return {
+      text: "",
+      provider: "alactic",
+      error: `Alactic AGI failed: ${message}`,
+    };
+  }
+}
+
+/**
  * Unified LLM call dispatcher
  */
 export async function callLLM(
@@ -156,6 +215,8 @@ export async function callLLM(
       return callOllama(text);
     case "openrouter":
       return callOpenRouter(text);
+    case "alactic":
+      return callAlactic(text);
     case "regex-only":
       return { text: "", provider: "regex-only" };
     default:
@@ -195,6 +256,15 @@ export async function checkProviderStatus(
       error: process.env.OPENROUTER_API_KEY
         ? undefined
         : "OPENROUTER_API_KEY not set",
+    };
+  }
+
+  if (provider === "alactic") {
+    return {
+      available: !!process.env.ALACTIC_API_KEY,
+      error: process.env.ALACTIC_API_KEY
+        ? undefined
+        : "ALACTIC_API_KEY not set",
     };
   }
 
