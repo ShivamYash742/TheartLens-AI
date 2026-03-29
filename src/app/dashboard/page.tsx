@@ -49,9 +49,14 @@ export default async function DashboardPage() {
             Active Threat Intelligence
           </p>
         </div>
-        <Link href="/upload" className="btn-primary flex items-center gap-2 px-4 py-2">
-          <span>📤</span> Upload Report
-        </Link>
+        <div className="flex gap-3">
+          <Link href="/eda" className="btn-primary flex items-center gap-2 px-4 py-2" style={{ background: "linear-gradient(135deg, #8b5cf6, #06b6d4)" }}>
+            <span>📊</span> EDA Analytics
+          </Link>
+          <Link href="/upload" className="btn-primary flex items-center gap-2 px-4 py-2">
+            <span>📤</span> Upload Report
+          </Link>
+        </div>
       </div>
 
       {threats.length === 0 ? (

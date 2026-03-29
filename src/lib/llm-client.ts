@@ -35,7 +35,7 @@ Now extract threats from this text:
  */
 async function callOllama(text: string): Promise<LLMResponse> {
   const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
-  const model = process.env.OLLAMA_MODEL || "lfm2.5-thinking";
+  const model = process.env.OLLAMA_MODEL || "lfm2.5-thinking:latest";
 
   try {
     const controller = new AbortController();
@@ -94,7 +94,7 @@ async function callOpenRouter(text: string): Promise<LLMResponse> {
 
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30000); // 30s timeout
+    const timeout = setTimeout(() => controller.abort(), 300000); // 30s timeout
 
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
@@ -177,7 +177,7 @@ export async function checkProviderStatus(
     try {
       const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
       const res = await fetch(`${host}/api/tags`, {
-        signal: AbortSignal.timeout(3000),
+        signal: AbortSignal.timeout(30000),
       });
       if (!res.ok)
         return { available: false, error: "Ollama server not responding" };
